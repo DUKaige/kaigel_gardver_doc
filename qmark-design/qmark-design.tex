@@ -4,14 +4,15 @@
 \usepackage[letterpaper]{geometry}
 \usepackage{amsthm, amsmath, amssymb, stmaryrd}
 \usepackage{mathpartir}
- 
+\usepackage{xcolor}
+\usepackage{lineno}
 \newtheorem{theorem}{Theorem}[section]
 \newtheorem{lemma}[theorem]{Lemma}
 \newtheorem{definition}[theorem]{Definition}
 
 \title{Imprecision Separation for Gradual Program Verification with Implicit Dynamic Frames}
 \author {Kaige Liu}
-\date {\today}
+\date {}
 
 %% Commands
 \newcommand{\lcar}{\left<}
@@ -52,9 +53,152 @@
 
 \begin{document}
 \maketitle
+\section{Introduction}
+Program verification is the process to ensure the correctness of a program by examining the program against a set of specifications. Program verification is becoming increasingly important in ensuring correctness and safety of program as the scale grows larger and the cost of manual verification increases. Current approaches to program verification are mostly based on either static verification, which is performed at compile time, or dynamic verification, which is performed at runtime.
+\subsection{Static Verification}
+Static verification tools verify a program without running any code. Current approaches to static verification are mostly based on formal methods like Hoare Logic \cite{p3},  so the correctness of the program can be established with contracts formally. The limitation of static verification is that when contracts are insufficient or incomplete, the quality of static verification can be low in many cases. Insufficiency or incompleteness in contract specification will cause a purely static verifier to fail in many trivial cases.
+\subsection{Dynamic Verification}
+Dynamic verification is to verify whether the environment and states of the program adhere to its specification at runtime. This new approach effectively reduces the overhead and results in really high precision by running contracts directly at runtime. However, dynamic verification will create a massive performance overhead on the source program, since all verification is performed at runtime with the source program. 
+
+\subsection{Gradual Verification}
+The idea of gradual verification \cite{p1} is to explore a combination of static and dynamic verification and utilize the advantages of both. Gradual verification introduces the concept of an imprecise contract, which can be manually specified by the user.  Imprecise gradual formulas are defined as $? * \phi$, where $\phi$ is a precise formula, and the whole formula represents an unknown formula with $\phi$ as the known part, and some unknown part $?$ that can be any formula that does not contradict the existing formula.\\
+
+On one hand, by checking a gradually specified program, the verifier can warn the programmer of inconsistencies between specifications and code including contracts that contradict the code and contracts that are too weak to perform further analysis on; on the other hand, the static checker will not produce warnings from any contract that is specified manually to be imprecise, a dynamic verification is used instead in these cases. Gradual verification, compared to static verification, improve the preciseness of verification compared to purely static verification, and is more efficient than a purely dynamic verification. Moreover, gradual verification allows contracts to be added gradually in the program, allowing the user to run the verification tool given any degree of contract specification.
+
+\subsection{Implicit Dynamic Frame}
+Hoare logic has been extended to more powerful logics like separation logic \cite{p4} and implicit dynamic frames \cite{p5}. Implicit Dynamic Frames is a close relative to separation logic, in which we use the notion \texttt{acc(e.f)} to indicate a method with ability to access a certain field.  An accessibility predicate \texttt{acc(e.f)} denotes exclusive access to the field \texttt{e.f}. It justifies accessing e.f both in the source code (e.g. \texttt{x.f := 3} or \texttt{y := x.f}) and in the formula itself (e.g. \texttt{acc(x.f) * (x.f  == 4)}).\\
+
+Specifications with accessibility predicates are crucial to the reasoning about the heap. Consider the following example OOP style code:\\
+\texttt{\noindent Class Counter \{  \\
+\setlength\parindent{24pt}
+\indent int x;\\
+\indent Counter() \\
+\indent \indent requires acc(this.x)\\
+\indent \indent ensures this.x == 0 * acc(this.x) \{\\
+\indent \indent this.x = 0;\\
+\indent \}\\
+\indent void addOne() \\
+\indent \indent requires acc(this.x)\\
+\indent \indent ensures result = old(this.x) + 1 * acc(this.x) \{\\
+\indent \indent this.x += 1;\\
+\indent \}\\
+\} \\
+void main() \{ \\
+\indent Counter counter1 = new Counter();\\
+\indent Counter counter2 = new Counter();\\
+\indent counter1.addOne();\\
+\indent assert(counter1.x == 1);\\
+\indent assert(counter2.x == 0);\\
+\} \\
+}
+It looks obvious that the assertions will hold, since we only call \texttt{addOne} on \texttt{counter0}. However, since the heap is accessible to all methods in most modern object-oriented programming language, for a static verifier to reason about the heap, it's necessary to know which fields are modified by each method. We introduce accessibility predicates \texttt{acc(this.x)} in the method \texttt{addOne} to indicate the method will only access the field \texttt{this.x}. Therefore, when verifiers static verfies the line \texttt{counter1.x}, it can ensure that \texttt{counter2.x} is not modified by calling \texttt{counter1.addOne}, and therefore \texttt{counter2.x} stays 0. \\
+
+Additionally, Implicit Dynamic Frames also provides aliasing information: whether two fields refer to the same memory location. Consider the following program:\\
+\texttt{\noindent Class Number \{  \\
+\setlength\parindent{24pt}
+\indent int x;\\
+\indent Number(int val) \\
+\indent \indent requires acc(this.x)\\
+\indent \indent ensures this.x == 0 * acc(this.x) \{\\
+\indent \indent this.x = val;\\
+\indent \}\\
+\} \\
+void exchange3(Number a, Number b, Number c)\\
+\indent requires acc(a.x) * acc(b.x) * acc(c.x)\\
+\indent ensures acc(a.x) * acc(b.x) * acc(c.x) \\
+\indent \hspace{12mm} * b.x == old(a.x) *  c.x == old(b.x) *  a.x == old(c.x) \{\\
+\indent int temp = a.x;\\
+\indent a.x = c.x;\\
+\indent c.x = b.x;\\
+\indent b.x = temp;\\
+\}\\
+}
+\setlength\parindent{0pt}
+In order to verify the method \texttt{exhacnge3} statically, one thing we need to make sure is that \texttt{a.x}, \texttt{b.x} and \texttt{c.x} refer to 3 different fields (otherwise the postcondition will not be met after the exchange). In this case, accessibility predicates ensure the aliasing of the 3 fields.\\ 
+
+Previous work by Bader \cite{p1} develops a combination of Gradual Verification and Implicit Dynamic Frame, named GVL\textsubscript{IDF}. It includes the concept of accessibility predicates in formulas, and designs rules to use accessibility predicates to reason about and heap access.
+\subsection{Imprecision Separation}
+The use of accessibility predicates with the introduction of Implicit Dynamic Frames largely improve the precision when the static verifier reasons about heaps. However, one practical issue is that accessibility predicates are really lengthy and difficult to write in real-life settings. Moreover, in some cases, the set of fields that a method will access might not be decidable before execution.\\ 
+
+The problem can be solved with previous work on Gradual verification, which examines the combination of Gradual Verification syntax and Implicit Dynamic Frames, where the unknown part of the gradual formula $? * \phi$ can be a combination of classical formulas (e.g. \texttt{e.f == 1}) and accessibility predicates (e.g. \texttt{acc(e.f)}). One solution to this problem is to place a question mark for every contract with unspecified accessibility predicates.  Consider the following example:\\
+\texttt{\noindent Class Account \{  \\
+\setlength\parindent{24pt}
+\indent int balance;\\
+\indent Account(int balance) \{\\
+\indent \indent requires acc(this.balance) * balance $\geq$ 0\\
+\indent \indent ensures acc(this.balance) *  this.balance == balance) \{\\
+\indent \indent this.balance = balance;\\
+\indent \}\\
+\indent void withdraw(int amount) \\
+\indent \indent requires acc(this.balance) * (this.balance $\geq$ amount)\\
+\indent \indent ensures ? * acc(this.balance) *  (this.balance $\geq$ 0) \{\\
+\indent \indent int newBalance = this.balance - amount;\\
+\indent \indent this.balance = newBalance; \\
+\indent \}\\
+\} \\
+void main() \{ \\
+\indent Account account = new Account(100);\\
+\indent account.withdraw(40);\\
+\indent account.withdraw(40);\\
+\} \\
+}
+\setlength\parindent{0pt}
+The program models a bank account, where each account has a single field balance, and a method withdraw that reduces the balance by a certain amount. Consider if we want to eliminate the accessibility predicates in the method \texttt{withdraw} by replacing the accessibility predicates with \texttt{?}:
+\texttt{void withdraw(int amount) \\
+\setlength\parindent{24pt}
+\indent requires ? * (this.balance $\geq$ amount)\\
+\indent ensures ? *  (this.balance $\geq$ 0) \{\\
+\indent int newBalance = this.balance - amount;\\
+\indent this.balance = newBalance; \\
+\}\\
+}
+\setlength\parindent{0pt}
+Such an approach will succeessfully reduce the complexity of accessibility predicate specification, but will largely introduce imprecision into the program, where the classical parts of the contracts are precise originally (e.g the precondition of the method).\\
+
+In this paper, we will introduce the idea of imprecision separation. Imprecision separation redefines gradual formulas with 2 types of question marks: $?_A$ indicating accessibility imprecision, and $?_C$ indicate classical imprecision. Now we consider an alternative program using the syntax with imprecision separation. We replace all accessibility predicates with $?_A$, and classical imprecision with $?_C$.\\
+\texttt{void withdraw(int amount) \\
+\setlength\parindent{24pt}
+\indent requires ?$_A$ * (this.balance $\geq$ amount)\\
+\indent ensures ?$_A$ *  (this.balance $\geq$ 0) * ?$_C$ \{\\
+\indent int newBalance = this.balance - amount;\\
+\indent this.balance = newBalance; \\
+\}\\
+}
+\setlength\parindent{0pt}
+The new program uses 2 different notions of imprecision. As a result, the precondition of \texttt{withdraw} will have no classical imprecision, and therefore the method is specified more precisely than the previous one.\\
+
+Another use case of imprecision separation, as mentioned previously, is when the set of fields accessed by a method cannot be determined. Consider the following example involving recursive functions:\\
+\texttt{\noindent Class ListNode \{  \\
+\setlength\parindent{24pt}
+\indent int val;\\
+\indent ListNode next;\\
+\indent ListNode findEnd()\\
+\indent \indent requires $?_A$\\
+\indent \indent ensures $?_A$ * result != null * result.next == null\{\\ 
+\indent \indent if (this.next == null) \{\\
+\indent \indent \indent return this;\\
+\indent \indent \} else \{\\
+\indent \indent \indent return this.next.findEnd();\\
+\indent \indent \}\\
+\indent \}\\
+\}\\
+}
+\setlength\parindent{0pt}
+Before we call the method \texttt{findEnd}, it's difficult to determine the set of fields we are accessing, which all nodes in a linked list. The use of imprecision separation again helps us introduces accessibility imprecision without adding unnecessary classical imprecision.\\
+
+\subsection{Contributions}
+To demonstrate the flexibility of our imprecision separation approach, we extend GVL\textsubscript{IDF} 2 different types of question marks. We propose the exact new definition of the formula syntax in section \ref{section_syntax}. In later section, we propose modifications to of  GVL\textsubscript{IDF} and show that the modified version satisfies the key properties of GVL\textsubscript{IDF}: consistent formula lifting (Section \ref{section_formula}), consistent implication lifting (Section \ref{section_implication}), equivalence of dynamic semantics ((Section \ref{section_dynamic})), finally soundness(Section \ref{section_soundness}) and gradual guarantee(Section \ref{section_guarantee}).
+
 \section{Syntax}
-$\tphi ::= \fphi \mid ?_A \ast \phi \mid \fphi \ast ?_C \mid  ?_A \ast \phi \ast ?_C$\\
-\section{Classical and Accessibility Parts}
+\label{section_syntax}
+We define $\textsc{OrdFormula} \subseteq \textsc{Formula}$ as the set of formulas that the accessibility predicate of any field appears before its usage. Formally, 
+$$\textsc{OrdFormula} = \{\phi_1 \ast \phi_2 ... \ast \phi_n \mid \forall 1 \leq i < j \leq n, \lfloor \phi_j \rfloor \nvdash \phi_i\}$$
+
+We define $\tphi \in \gradformula$, given $\phi \in \textsc{OrdFormula}$, as
+$$\tphi ::= \fphi \mid ?_A \ast \phi \mid \fphi \ast ?_C \mid  ?_A \ast \phi \ast ?_C$$
+Notice that $\fphi$ must be self-framed and $\phi$ might not be self-framed. We use $\phi$ with $?_A$ since $?_A$ can provide framing for the later parts of the formula. We require $\phi$ to be an ordered formula so that there is a potential set of accessibility predicates that can frame the formula. \\
+
+We defien the concretization of a gradual formula as the set of static formulas that it can represent. To define concretization, we first define the classical and accessibility part of a formula.
 \begin{definition}
 \label{def_AC}
 We define $\phi_A$ as the accessibility parts, and $\phi_C$ as the classical parts of the formula $\phi$, conjuated by $\ast$.
@@ -66,37 +210,40 @@ Let $\phi, \phi' \in \satdef$. Then:
 $$\phi_C \Rightarrow \phi'_C \wedge \phi_A \Rightarrow \phi'_A \implies \phi \Rightarrow \phi'$$
 \end{lemma}
 
-\begin{proof}
-	Assume $\phi_C \Rightarrow \phi'_C$ and $\phi_A \Rightarrow \phi'_A$. Take any formula component $\phi''$ separted by *  from $\phi'$ . 
+\begin{proof} (Proof for Lemma \ref{lemma_AC})\\
+    Assume $\phi_C \Rightarrow \phi'_C$ and $\phi_A \Rightarrow \phi'_A$. Take any formula component $\phi''$ separted by *  from $\phi'$ . 
 \begin{itemize}
-	\item If $\phi'' = \acc{e.f}$, $\phi''$ is part of $\phi'_A$. Since $\phi \imp \phi_A$, $\phi_A \imp \phi'_A$ and $\phi'_A \imp \phi''$, then $\phi_A \imp \phi''$ by transitivity of implication.  
-	\item Otherwise, if $\phi''$ is not an accessibility predicate, $\phi''$ is part of $\phi'_C$. Since $\phi \imp \phi_C$, $\phi_C \imp \phi'_C$, $\phi'_C \imp \phi''$, $\phi \imp \phi''$ by transitivity of implication.  componenet 
-\end{itemize}	
+    \item If $\phi'' = \acc{e.f}$, $\phi''$ is part of $\phi'_A$. Since $\phi \imp \phi_A$, $\phi_A \imp \phi'_A$ and $\phi'_A \imp \phi''$, then $\phi_A \imp \phi''$ by transitivity of implication.  
+    \item Otherwise, if $\phi''$ is not an accessibility predicate, $\phi''$ is part of $\phi'_C$. Since $\phi \imp \phi_C$, $\phi_C \imp \phi'_C$, $\phi'_C \imp \phi''$, $\phi \imp \phi''$ by transitivity of implication.  componenet 
+\end{itemize}    
 Therefore, each component $\phi''$ of $\phi'$ is implied by $\phi$. We can conclude $\phi \imp \phi'$.
 \end{proof}
-\section{Concretization}
+
+Finally, we propose a concretization definition of gradual formulas.
 \begin{definition}
 \label{def_conc}
 $\gamma : \gradformula \rightarrow \mathbb{P}(\formula)$ is defined as:
 \begin{align*}
 &\gamma(\fphi) = \{\fphi\}\\
 &\gamma(?_A \ast \phi \ast ?_C) = 
-	\begin{cases}
-	 \{\fphi' \in \satdef \mid \fphi' \imp \phi\} & (\phi \in \satdef)\\
-	 undefined &otherwise\\
-	\end{cases} \\
+    \begin{cases}
+     \{\fphi' \in \satdef \mid \fphi' \imp \phi\} & (\phi \in \satdef)\\
+     undefined &otherwise\\
+    \end{cases} \\
 &\gamma(?_A \ast \phi) = 
-	\begin{cases}
-	 \{\fphi' \in \satdef \mid \fphi'_C \Leftrightarrow \phi_C \wedge \fphi'_A \imp \phi_A\} & (\phi \in \satdef)\\
-	 undefined &otherwise\\
-	\end{cases} \\
+    \begin{cases}
+     \{\fphi' \in \satdef \mid \fphi'_C \Leftrightarrow \phi_C \wedge \fphi'_A \imp \phi_A\} & (\phi \in \satdef)\\
+     undefined &otherwise\\
+    \end{cases} \\
 &\gamma(\fphi \ast ?_C) = 
-	\begin{cases}
-	 \{\fphi' \in \satdef \mid \fphi'_A \Leftrightarrow \phi_A \wedge \fphi'_C \imp \phi_C\} & (\fphi \in \satdef)\\
-	 undefined &otherwise\\
-	\end{cases} \\
+    \begin{cases}
+     \{\fphi' \in \satdef \mid \fphi'_A \Leftrightarrow \phi_A \wedge \fphi'_C \imp \phi_C\} & (\fphi \in \satdef)\\
+     undefined &otherwise\\
+    \end{cases} \\
 \end{align*}
 \end{definition}
+
+Notice that by our definition, every formula in the concretization implies the static part of the original formula. Also, if the gradual formula is classically precise, the classical part of the gradual formula will also imply the classical part of every formula in the conretization set. Same holds for the accessibility part. 
 %\begin{lemma}
 %\label{lemma_partial_galois_conn}
 %Abstraction $\alpha$ and concretization $\gamma$ form a partial Galois connection $\langle \alpha, 
@@ -106,7 +253,41 @@ $\gamma : \gradformula \rightarrow \mathbb{P}(\formula)$ is defined as:
 %\end{proof}
 
 
-\section{Foorprint Formula}
+\section{Consistent Formula Lifiting}
+\label{section_formula}
+We define evaluation of a formula as the following:
+\begin{definition}
+\label{def_lift}
+Let $\cdot \tconsistent \cdot \subseteq \textsc{MEM} \times \gradformula$ be defined inductively as:\\
+\[ \inferrule*[right=$\widetilde{\textsc{EvalStatic}}$]
+   {m \consistent \fphi}
+   {m \tconsistent \fphi}
+\]
+
+
+\[ \inferrule*[right=$\widetilde{\textsc{EvalGrad}}$]
+    {m \consistent \phi \\ A \frm \phi \\ \forall \langle e,f\rangle  \in A. m \consistent \acc{e.f}}
+    {m \tconsistent ?_A \ast \phi \ast ?_C}
+\]
+
+\[ \inferrule*[right=$\widetilde{\textsc{EvalGrad}_A}$]
+    {m \consistent \phi \\ A \frm \phi \\ \forall \langle e,f\rangle  \in A. m \consistent \acc{e.f}}
+    {m \tconsistent ?_A \ast \phi}
+\]
+
+
+\[ \inferrule*[right=$\widetilde{\textsc{EvalGrad}_C}$]
+   {m \consistent \phi}
+   {m \tconsistent \phi \ast ?_C}
+\]
+\end{definition}
+The extra premises in $\widetilde{\textsc{EvalGrad}}$ and $\widetilde{\textsc{EvalGrad}_A}$ ensures that there is a possible framing of the gradual formula, that is supported by the footprint in m. Our definition is a proper lifting, formalized by the following lemma:
+\begin{lemma}
+\label{lemma_eval_lift}
+(Consistent Formula Evaluation) $\tconsistent$ is a consistent lifting of $\consistent$. Formally,  $$\exists \fphi \in \gamma(\tphi).m \consistent  \fphi \iff m \tconsistent \tphi$$
+\end{lemma}
+
+The rest of this section explicitly deals with the proof of Consistent Formula Evaluation (Lemma \ref{lemma_eval_lift}). 
 \begin{definition}
 Define a partial order on fields $\leq : \textsc{Field} \times \textsc{Field}$ as $\langle e,f\rangle \leq \langle e',f'\rangle$ iff $e'$ contains $e.f$ in $e'$ or $(e = e') \wedge (f = f')$.
 \end{definition}
@@ -117,9 +298,9 @@ $\leq$ defines a partial order on $\textsc{Field}$.
 \end{lemma}
 \begin{proof} Proof for Lemma \ref{lemma_field_poset}
 \begin{itemize}
-	\item Reflexive: $\langle e,f\rangle  \leq \langle e,f\rangle $ since $e = e$ and $f = f$ by definition.
-	\item Anti-symmetric: Given $\langle e',f'\rangle  \leq \langle e,f\rangle $ and $\langle e,f\rangle  \leq \langle e',f'\rangle $. Suppose $e \neq e'$ or $f \neq f'$. Then if $e = e'$ and $f = f'$, we are done with the proof. Otherwise, assume $e \neq e' \vee f \neq f'$, then $e$ contains $e'.f'$ and $e'$ contains $e.f$, which implies $e contains e.f$. Contradiction. 
-	\item Transitive: Given $\langle e,f\rangle  \leq \langle e',f'\rangle $ and $\langle e',f'\rangle  \leq \langle e'',f''\rangle $. If $e' = e''$ and $f' = f''$, then clearly $\langle e,f\rangle  \leq \langle e'',f''\rangle $. Otherwise, $e'$ contains $e''.f''$. Also, $e$ contains $e'.f'$. Therefore, $e$ contains $e''.f''$.
+    \item Reflexive: $\langle e,f\rangle  \leq \langle e,f\rangle $ since $e = e$ and $f = f$ by definition.
+    \item Anti-symmetric: Given $\langle e',f'\rangle  \leq \langle e,f\rangle $ and $\langle e,f\rangle  \leq \langle e',f'\rangle $. Suppose $e \neq e'$ or $f \neq f'$. Then if $e = e'$ and $f = f'$, we are done with the proof. Otherwise, assume $e \neq e' \vee f \neq f'$, then $e$ contains $e'.f'$ and $e'$ contains $e.f$, which implies $e contains e.f$. Contradiction. 
+    \item Transitive: Given $\langle e,f\rangle  \leq \langle e',f'\rangle $ and $\langle e',f'\rangle  \leq \langle e'',f''\rangle $. If $e' = e''$ and $f' = f''$, then clearly $\langle e,f\rangle  \leq \langle e'',f''\rangle $. Otherwise, $e'$ contains $e''.f''$. Also, $e$ contains $e'.f'$. Therefore, $e$ contains $e''.f''$.
 \end{itemize}
 \end{proof}
 \begin{definition}
@@ -127,7 +308,7 @@ $\leq$ defines a partial order on $\textsc{Field}$.
 Define $\mu(\cdot) : \statfprint \rightarrow \formula$. $\mu$ maps a static footprint $A$ to a formula $\phi' = \mu(A)$. For each $\langle e,f \rangle \in A$,$\phi'$ should contain $acc(e.f)$. Then, $\phi'$ is sorted in ascending order with the partial order $\leq$.\\
 \end{definition}
 
-The following lemma describe a property of the minimum foorprint of a formula, that A must contain all subchains of any chain of fields $e.f_1.f_2...f_n.f$.\\
+The following lemma describes a property of the minimum footprint of a formula, that A must contain all subchains of any chain of fields $e.f_1.f_2...f_n.f$.\\
 
 \begin{lemma}
 \label{lemma_frm_chain} 
@@ -141,67 +322,35 @@ Supppose for the sake of contradiction, that for some field access $e.f_1.f_2...
 The following lemma claims the existence of a self-framed formula with a postfix of any given formula.\\
 \begin{lemma}
 \label{lemma_mu}
-Let $\phi \in \formula$, and $A = \min_{\subseteq}\{A' \in \textsc{statfprint} | A' \frm \phi\}$. Then, $\mu(A) \ast \phi$ is self-framed.
+Let $\phi \in \textsc{OrdFormula}$, and $A = \min_{\subseteq}\{A' \in \textsc{statfprint} | A' \frm \phi\}$. Then, $\mu(A) \ast \phi$ is self-framed.
 \end{lemma}
 \begin{proof} Proof for Lemma \ref{lemma_mu}
 First, we prove that $\emptyset \frm \mu(A)$. We proceed by induction on the first $k$ accesibility predicates separated by $\ast$ of $\mu(A)$.
 \begin{itemize}
-	\item \textbf{Base case}: k = 0. Clearly, $\emptyset \frm \true$.
-	\item \textbf{Inductive step}: Let the first k accessibility predicates of $\mu(A)$, separated by $\ast$, be $\mu(A)_{1-k}$. Suppose for the first $k$ accessibility predicates of $\mu(A)$, $\emptyset \frm \mu(A)_{[k]}$ (Induction Hypothesis). Let the $k+1$th accessibility predicate be $acc(e.f)$. Need to show $\emptyset \frm mu(A)_{[k+1]}$. We proceed by a sub-induction:\\
-	\textbf{Sub-Claim: Let $e = e'.f_1.f_2...f_m$. Then, $\forall 0 \leqslant n \leqslant m$, $\lfloor \mu(A)_{[k]} \rfloor \frm e'.f_1.f_2...f_n$.}
-	\begin{itemize}
-		\item \textbf{Sub-Base case}: n = 0. Since $\emptyset \frm e'$ for arbitrary non-field access, $\lfloor \mu(A)_{[k]} \rfloor \frm e'$.
-		\item\textbf{ Sub-Inductive case}: For simplification, let $e'' = e'.f_1...f_n$. Suppose for some n, $\lfloor \mu(A)_{[k]} \rfloor \frm e'.f_1.f_2...f_n = e''$.  We need to show $\lfloor \mu(A)_{[k]} \rfloor \frm e'.f_1.f_2...f_{n+1} = e''.f_{n+1}$.  Since $A \frm \phi$ and $A$ is minimal, by Lemma \ref{lemma_frm_chain}, $\langle e'',f_{n+1} \rangle \in A$. By definition of $\mu$ (Definition \ref{def_mu}), $acc(e''.f_{n+1})$ appears in $\mu(A)$ . Since $\mu(A)$ is sorted by partial order $\leq$, and $e$ contains $e''.f_{n+1}$, therefore, $acc(e''.f_{n+1})$ must appear before the kth term of $\mu(A)$, so $acc(e''.f_{n+1})$ is in $\mu(A)_{[k]}$. By \textsc{FField}, since $\langle e'',f_{n+1}\rangle \in \lfloor \mu(A)_{[k]} \rfloor$ and $\lfloor \mu(A)_{[k]} \rfloor \frm e''$ by induction hypothesis, $\lfloor \mu(A)_{[k]} \rfloor \frm e''.f_{n+1}$
-	\end{itemize}
-	Therefore, $\lfloor \mu(A)_{[k]} \rfloor \frm e$. By \textsc{SFAcc}, $A \frm acc(e.f)$. By \textsc{SFSepOp}, $\emptyset \frm \mu(A)_{[k]}$ and $\lfloor \mu(A)_{[k]} \rfloor \frm acc(e.f)$, $\emptyset \frm \mu(A)_{[k]} \ast acc(e.f) = \mu(A)_{k+1}$
+    \item \textbf{Base case}: k = 0. Clearly, $\emptyset \frm \true$.
+    \item \textbf{Inductive step}: Let the first k accessibility predicates of $\mu(A)$, separated by $\ast$, be $\mu(A)_{1-k}$. Suppose for the first $k$ accessibility predicates of $\mu(A)$, $\emptyset \frm \mu(A)_{[k]}$ (Induction Hypothesis). Let the $k+1$th accessibility predicate be $acc(e.f)$. Need to show $\emptyset \frm mu(A)_{[k+1]}$. We proceed by a sub-induction:\\
+    \textbf{Sub-Claim: Let $e = e'.f_1.f_2...f_m$. Then, $\forall 0 \leqslant n \leqslant m$, $\lfloor \mu(A)_{[k]} \rfloor \frm e'.f_1.f_2...f_n$.}
+    \begin{itemize}
+        \item \textbf{Sub-Base case}: n = 0. Since $\emptyset \frm e'$ for arbitrary non-field access, $\lfloor \mu(A)_{[k]} \rfloor \frm e'$.
+        \item\textbf{ Sub-Inductive case}: For simplification, let $e'' = e'.f_1...f_n$. Suppose for some n, $\lfloor \mu(A)_{[k]} \rfloor \frm e'.f_1.f_2...f_n = e''$.  We need to show $\lfloor \mu(A)_{[k]} \rfloor \frm e'.f_1.f_2...f_{n+1} = e''.f_{n+1}$.  Since $A \frm \phi$ and $A$ is minimal, by Lemma \ref{lemma_frm_chain}, $\langle e'',f_{n+1} \rangle \in A$. By definition of $\mu$ (Definition \ref{def_mu}), $acc(e''.f_{n+1})$ appears in $\mu(A)$ . Since $\mu(A)$ is sorted by partial order $\leq$, and $e$ contains $e''.f_{n+1}$, therefore, $acc(e''.f_{n+1})$ must appear before the kth term of $\mu(A)$, so $acc(e''.f_{n+1})$ is in $\mu(A)_{[k]}$. By \textsc{FField}, since $\langle e'',f_{n+1}\rangle \in \lfloor \mu(A)_{[k]} \rfloor$ and $\lfloor \mu(A)_{[k]} \rfloor \frm e''$ by induction hypothesis, $\lfloor \mu(A)_{[k]} \rfloor \frm e''.f_{n+1}$
+    \end{itemize}
+    Therefore, $\lfloor \mu(A)_{[k]} \rfloor \frm e$. By \textsc{SFAcc}, $A \frm acc(e.f)$. By \textsc{SFSepOp}, $\emptyset \frm \mu(A)_{[k]}$ and $\lfloor \mu(A)_{[k]} \rfloor \frm acc(e.f)$, $\emptyset \frm \mu(A)_{[k]} \ast acc(e.f) = \mu(A)_{k+1}$
 \end{itemize}
-Therefore, by the induction, we proved that $\emptyset \frm \mu(A)$. By definition of $\mu$, $\lfloor \mu(A) \rfloor = A$. $A \frm \phi$, so $\lfloor \mu(A) \rfloor \frm \phi$. By \textsc{SFSepOp}, $\empty \frm \mu(A)$, $\lfloor \mu(A) \rfloor \frm \phi$, we can finally conclude that $\emptyset \frm \mu(A) \ast \phi$.
+Therefore, by the induction, we proved that $\emptyset \frm \mu(A)$. By definition of $\mu$, $\lfloor \mu(A) \rfloor = A$. $A \frm \phi$, so $\lfloor \mu(A) \rfloor \frm \phi$. By \textsc{SFSepOp}, $\empty \frm \mu(A)$, $\lfloor \mu(A) \rfloor \frm \phi$, we can finally conclude that $\emptyset \frm \mu(A) \ast \phi$.\\
+
+Addtionally, we prove $\mu(A) \ast \phi$ is a well-formed formula with no repeated accessibility predicate. Suppose there $acc(e,f)$ appears twice in $\mu(A) \ast \phi$. Since $\phi$ is well formed and $\mu(A)$ forms from a set of footprints with no repeat, the 2 $acc(e.f)$ cannot be both in $\mu(A)$ or $\phi$. Therefore, one of $acc(e.f)$ is in $\mu(A)$, which means that there must be some part of $\phi$ that uses $e.f$, and appears before $acc(e.f)$ in $\phi$. This is a contradiction to $\phi \in \textsc{OrdFormula}$.
 \end{proof}
 
-
-\section{Frame Implication}
  \begin{lemma}
  \label{lemma_frm_imp}
  Let $\fphi, \phi' \in \formula$ such that $\fphi \imp \phi'$, and $A = \min_{\subseteq}\{A' \in \statfprint \mid A' \frm \phi'\}$. Then, $A \subseteq \lfloor \fphi \rfloor$
 \end{lemma}
-\begin{proof}
-	Let $\langle e,f\rangle  \in A$ be arbitrary. Since $A$ is the minimum footprint that frames $phi'$, $\exists \phi_0'$ as a component of $\phi'$ separated by $\ast$ such that $\phi_0'$ contains $e.f$. Let $E = \{\langle H, \rho, A\rangle  \in \textsc{env} \mid \rho \consistent \fphi\}$ and $E' = \{\langle H', \rho', A'\rangle  \in \textsc{env} \mid \rho \consistent \phi'\}$. By definition of implication, since $\fphi \imp \phi'$, $E \subseteq E'$. By the grammar of the verification language, $\phi_0'$ can be either $e.f \odot k$ or $k \odot e.f$, in either case some possible value of $e.f$ is eliminated. $\exists o$ such that $\forall \langle H', \rho', A'\rangle  \in E'$, $H, \rho \vdash e.f \Downarrow v$ and $v \neq o$. Since $E \subseteq E'$, $\forall \langle H, \rho, A\rangle  \in E$, $H, \rho \vdash e.f \Downarrow v$ and $v \neq o$. Therefore, $\fphi$ must contain a component $\phi_0$ separated by $\ast$, such that $\phi_0$ contains $e.f$. Since $\fphi$ is self-framed, $\fphi$ contains $\acc{e.f}$, and therefore $\langle e,f\rangle  \in \lfloor \fphi \rfloor$.
-	
+\begin{proof} (Proof for lemma \ref{lemma_frm_imp})\\
+    Let $\langle e,f\rangle  \in A$ be arbitrary. Since $A$ is the minimum footprint that frames $phi'$, $\exists \phi_0'$ as a component of $\phi'$ separated by $\ast$ such that $\phi_0'$ contains $e.f$. Let $E = \{\langle H, \rho, A\rangle  \in \textsc{env} \mid \rho \consistent \fphi\}$ and $E' = \{\langle H', \rho', A'\rangle  \in \textsc{env} \mid \rho \consistent \phi'\}$. By definition of implication, since $\fphi \imp \phi'$, $E \subseteq E'$. By the grammar of the verification language, $\phi_0'$ can be either $e.f \odot k$ or $k \odot e.f$, in either case some possible value of $e.f$ is eliminated. $\exists o$ such that $\forall \langle H', \rho', A'\rangle  \in E'$, $H, \rho \vdash e.f \Downarrow v$ and $v \neq o$. Since $E \subseteq E'$, $\forall \langle H, \rho, A\rangle  \in E$, $H, \rho \vdash e.f \Downarrow v$ and $v \neq o$. Therefore, $\fphi$ must contain a component $\phi_0$ separated by $\ast$, such that $\phi_0$ contains $e.f$. Since $\fphi$ is self-framed, $\fphi$ contains $\acc{e.f}$, and therefore $\langle e,f\rangle  \in \lfloor \fphi \rfloor$.
+    
 \end{proof}
 
-\section{Consistent Formula Lifting}
-\label{def_lift}
-\begin{definition}
-Let $\cdot \tconsistent \cdot \subseteq \textsc{MEM} \times \gradformula$ be defined inductively as:\\
-\[ \inferrule*[right=$\widetilde{\textsc{EvalStatic}}$]
-   {m \consistent \fphi}
-   {m \tconsistent \fphi}
-\]
-
-
-\[ \inferrule*[right=EvalGrad]
-	{m \consistent \phi \\ A \frm \phi \\ \forall \langle e,f\rangle  \in A. m \consistent \acc{e.f}}
-	{m \tconsistent ?_A \ast \phi \ast ?_C}
-\]
-
-\[ \inferrule*[right=EvalGrad$_A$]
-	{m \consistent \phi \\ A \frm \phi \\ \forall \langle e,f\rangle  \in A. m \consistent \acc{e.f}}
-	{m \tconsistent ?_A \ast \phi}
-\]
-
-
-\[ \inferrule*[right=EvalGrad$_C$]
-   {m \consistent \phi}
-   {m \tconsistent \phi \ast ?_C}
-\]
-\end{definition}
-
-
-\begin{lemma}
-\label{lemma_eval_lift}
-Consistent Formula Evaluation: $$\exists \fphi \in \gamma(\tphi).m \consistent  \fphi \iff m \tconsistent \tphi$$
-
-\end{lemma}
+Finally, we provide a proof for consistent formula evaluation:
 \begin{proof} (Proof for Lemma \ref{lemma_eval_lift})
 \subsubsection*{Case $\tphi = \phi'$}
  It follows from definition of $\gamma$(\ref{def_conc}) and static that $\gamma(\fphi) = \{\phi\}$ and that $static(\fphi) = \phi$. Also, $m \consistent static(\fphi)$ if and only if $m \tconsistent \fphi$(\ref{def_lift}). Therefore, the theorem trivially holds.
@@ -212,56 +361,53 @@ Consistent Formula Evaluation: $$\exists \fphi \in \gamma(\tphi).m \consistent  
  Applying the definitions of $\gamma$ and $\tconsistent$, the goal becomes: $$\exists \fphi' \in 
 \satdef. (\fphi'_c \Leftrightarrow \phi_c) \wedge (\fphi'_A \Rightarrow \phi_A) \wedge (m \consistent  \fphi') \iff m \consistent \phi, \exists A \frm \phi.\forall \langle e,f\rangle  \in A. m \consistent \acc{e.f}$$
  \begin{itemize}
- 	\item Case $\Rightarrow$: Since $\fphi'_C \Rightarrow \phi_C$ and $\fphi'_A \Rightarrow \phi_A$, we can conclude $\fphi' \Rightarrow \phi$ (by Lemma \ref{lemma_AC}). Since $m \consistent \fphi'$, by definition of implication, $m \consistent \phi$.\\ 
+     \item Case $\Rightarrow$: Since $\fphi'_C \Rightarrow \phi_C$ and $\fphi'_A \Rightarrow \phi_A$, we can conclude $\fphi' \Rightarrow \phi$ (by Lemma \ref{lemma_AC}). Since $m \consistent \fphi'$, by definition of implication, $m \consistent \phi$.\\ 
 Let $A = \min_{\subseteq}\{A' \in \statfprint \mid A' \frm \phi\}$. $m \consistent \fphi'$ implies that $\forall \langle e,f\rangle  \in \lfloor \fphi' \rfloor, m \consistent acc(e.f)$. We also have $\fphi' \Rightarrow \phi$, so $A \subseteq \lfloor \fphi' \rfloor$ by Lemma \ref{lemma_frm_imp}. Therefore, $\forall \langle e,f\rangle  \in A, m \consistent acc(e.f)$
- 	\item Case $\Leftarrow$ Let $\fphi' = \mu(A) \ast \phi$. Since we didn't add anything to the classical part of $\fphi'$, $\fphi'_C \Leftrightarrow \phi_C$ trivially holds. Since we only add more items to the accessibility part of the formula, $\fphi'_A \Rightarrow \phi_A$ holds. Finally, since $\forall \langle e,f\rangle  \in A. m \consistent \acc{e.f}$, by Definition \ref{def_mu}, we know that $m \consistent \mu(A)$. Since $m \consistent \phi$, therefore, $m \consistent \mu(A) * \phi = \fphi'$.\\
+     \item Case $\Leftarrow$ Let $A = \min_{\subseteq}\{A' \in \statfprint \mid A' \frm \phi\}$. Let $\fphi' = \mu(A) \ast \phi$. $\fphi$ is self-framed by Lemma \ref{lemma_mu}. Since we didn't add anything to the classical part of $\fphi'$, $\fphi'_C \Leftrightarrow \phi_C$ trivially holds. Since we only add more items to the accessibility part of the formula, $\fphi'_A \Rightarrow \phi_A$ holds. Finally, since $\forall \langle e,f\rangle  \in A. m \consistent \acc{e.f}$, by Definition \ref{def_mu}, we know that $m \consistent \mu(A)$. Since $m \consistent \phi$, therefore, $m \consistent \mu(A) * \phi = \fphi'$.\\
  \end{itemize}
  
  \subsubsection*{Case $\tphi =  \fphi \ast ?_C$}
  Applying the definitions of $\gamma$, the goal becomes: $$\exists \fphi' \in 
 \satdef. \fphi'_A \Leftrightarrow \fphi_A \wedge \fphi'_C \Rightarrow \fphi_C \wedge m \consistent  \fphi' \iff m \consistent \fphi$$
  \begin{itemize}
- 	\item Case $\Rightarrow$: Since $\fphi'_C \Rightarrow \fphi_C$ and $\fphi'_A \Rightarrow \fphi_A$, $\fphi' \Rightarrow \fphi$. Also, since $m \consistent \fphi'$, by definition of implication, $m \consistent \fphi$.
- 	\item Case $\Leftarrow$ substitute $\fphi$ for $\fphi'$.  All the 3 clauses on the left hand side trivially hold.
+     \item Case $\Rightarrow$: Since $\fphi'_C \Rightarrow \fphi_C$ and $\fphi'_A \Rightarrow \fphi_A$, $\fphi' \Rightarrow \fphi$. Also, since $m \consistent \fphi'$, by definition of implication, $m \consistent \fphi$.
+     \item Case $\Leftarrow$ substitute $\fphi$ for $\fphi'$.  All the 3 clauses on the left hand side trivially hold.
  \end{itemize} 
  
 \subsubsection*{Case $\tphi = ?_A \ast \phi \ast ?_C$}
  Applying the definitions of $\gamma$, the goal becomes: $$\exists \fphi' \in 
 \satdef. \fphi' \Rightarrow \phi \wedge m \consistent  \fphi' \iff m \consistent \phi, A \frm \phi,\forall \langle e,f\rangle  \in A. m \consistent \acc{e.f}$$
  \begin{itemize}
-	\item Case $\Rightarrow$: Since $\fphi' \Rightarrow \phi$ and $m \consistent \fphi'$, by definition of implication, $m \consistent \phi$.\\ 
+    \item Case $\Rightarrow$: Since $\fphi' \Rightarrow \phi$ and $m \consistent \fphi'$, by definition of implication, $m \consistent \phi$.\\ 
 Let $A = \min_{\imp}\{A' \in \statfprint \mid A' \frm \phi\}$. $m \consistent \fphi'$ implies that $\forall \langle e,f\rangle  \in \lfloor \fphi' \rfloor, m \consistent acc(e.f)$. We also have $\fphi' \Rightarrow \phi$, so $A \subseteq \lfloor \fphi' \rfloor$ by Lemma \ref{lemma_frm_imp}. Therefore, $\forall \langle e,f\rangle  \in A, m \consistent acc(e.f)$
- 	\item Case $\Leftarrow$: Let $\fphi' = \mu(A) \ast \phi$. Since we didn't add anything to the classical part of $\fphi'$, $\fphi'_C \imp \phi_C$ trivially holds. Since we only add more items to the accessibility part of the formula, $\fphi'_A \Rightarrow \phi_A$ holds. By Lemma \ref{def_AC}, $\fphi' \imp \phi$. Finally, since $\forall \langle e,f\rangle  \in A. m \consistent \acc{e.f}$, by definition of $\mu$ (Definition \ref{def_mu}), we know that $m \consistent \mu(A)$. Since $m \consistent \phi$, therefore, $m \consistent \mu(A) * \phi = \fphi'$.\\
- \end{itemize} 
- 
- 
- 
+     \item Case $\Leftarrow$: Let $A = \min_{\subseteq}\{A' \in \statfprint \mid A' \frm \phi\}$. Let $\fphi' = \mu(A) \ast \phi$. $\fphi$ is self-framed by Lemma \ref{lemma_mu}. Since we didn't add anything to the classical part of $\fphi'$, $\fphi'_C \imp \phi_C$ trivially holds. Since we only add more items to the accessibility part of the formula, $\fphi'_A \Rightarrow \phi_A$ holds. By Lemma \ref{def_AC}, $\fphi' \imp \phi$. Finally, since $\forall \langle e,f\rangle  \in A. m \consistent \acc{e.f}$, by definition of $\mu$ (Definition \ref{def_mu}), we know that $m \consistent \mu(A)$. Since $m \consistent \phi$, therefore, $m \consistent \mu(A) * \phi = \fphi'$.\\
+ \end{itemize}  
 \end{proof}
 
-
 \section{Implication}
+\label{section_implication}
 \begin{definition}
 \label{def_imp}
 Let $\cdot \timp \cdot \subseteq \gradformula \times \gradformula$ be defined inductively as:\\
-\[ \inferrule*[right=ImplStatic]
+\[ \inferrule*[right=$\widetilde{\textsc{ImplStatic}}$]
    {\fphi \in \satdef \\ \fphi \imp \static{\tphi'} }
    {\fphi \timp \tphi'}
 \]
 
 \[
-\inferrule*[right=ImplGrad]
+\inferrule*[right=$\widetilde{\textsc{ImplGrad}}$]
    {\fphi \in \satdef \\  \fphi \imp \phi\\ \fphi \imp \static{\tphi'}}
    {?_A \ast \phi \ast ?_C \timp \tphi'}
 \]
 
 \[
-\inferrule*[right=ImplGrad\textsubscript{A}]
+\inferrule*[right=$\widetilde{\textsc{ImplGrad}_A}$]
    {\fphi \in \satdef \\  \fphi_C \Leftrightarrow \phi_C\\ \fphi_A \Rightarrow \phi_A\\ \fphi \imp \static{\tphi'}}
    {?_A \ast \phi\timp \tphi'}
 \]
 
 \[
-\inferrule*[right=ImplGrad\textsubscript{C}]
+\inferrule*[right=$\widetilde{\textsc{ImplGrad}_C}$]
    {\fphi \in \satdef \\  \fphi_A \Leftrightarrow \phi_A\\ \fphi_C \Rightarrow \phi_C\\ \fphi \imp \static{\tphi'}}
    {\phi \ast ?_C \timp \tphi'}
 \]
@@ -274,14 +420,14 @@ Gradual implication can be equivalently defined as the following:\\ For $\tphi, 
 \end{lemma}
 \begin{proof}(Proof for Lemma \ref{lemma_impl_equiv})\\
 \begin{itemize}
-	\item Case $\tphi' = \fphi'$: By $\textsc{implstatic}$ (Definition \ref{def_imp}), $\exists \fphi \in \satdef.\fphi \imp static(\fphi') \iff \fphi \timp \fphi'$. By definition of $\gamma$ (Definition \ref{def_conc}), $\fphi \in \gamma(\fphi) \iff \fphi \imp static(\fphi')$. Therefore, $\tphi \timp \tphi' \iff \exists \fphi. \fphi \in \gamma(\tphi) \wedge \fphi \imp static(\tphi')$.
+    \item Case $\tphi' = \fphi'$: By $\textsc{implstatic}$ (Definition \ref{def_imp}), $\exists \fphi \in \satdef.\fphi \imp static(\fphi') \iff \fphi \timp \fphi'$. By definition of $\gamma$ (Definition \ref{def_conc}), $\fphi \in \gamma(\fphi) \iff \fphi \imp static(\fphi')$. Therefore, $\tphi \timp \tphi' \iff \exists \fphi. \fphi \in \gamma(\tphi) \wedge \fphi \imp static(\tphi')$.
 
-	\item Case $\tphi' = ?_A \ast \phi' \ast ?_C$: By $\textsc{implgrad}$ (Definition \ref{def_imp}), $\exists \fphi \in \satdef.\fphi\Rightarrow \phi' \iff \fphi \timp \fphi'$. By definition of $\gamma$ (Definition \ref{def_conc}), $\fphi \in \gamma(\fphi) \iff \fphi\Rightarrow \phi'$. Therefore, $\tphi \timp \tphi' \iff \exists \fphi. \fphi \in \gamma(\tphi) \wedge \fphi \imp static(\tphi')$.
+    \item Case $\tphi' = ?_A \ast \phi' \ast ?_C$: By $\textsc{implgrad}$ (Definition \ref{def_imp}), $\exists \fphi \in \satdef.\fphi\Rightarrow \phi' \iff \fphi \timp \fphi'$. By definition of $\gamma$ (Definition \ref{def_conc}), $\fphi \in \gamma(\fphi) \iff \fphi\Rightarrow \phi'$. Therefore, $\tphi \timp \tphi' \iff \exists \fphi. \fphi \in \gamma(\tphi) \wedge \fphi \imp static(\tphi')$.
 
 
-	\item Case $\tphi' = ?_A \ast \phi'$: By $\textsc{implgrad}_A$ (Definition \ref{def_imp}), $\exists \fphi \in \satdef.\fphi_C \Leftrightarrow \fphi'_C \wedge \fphi_A \Rightarrow \fphi'_A \iff \fphi \timp \fphi'$. By definition of $\gamma$ (Definition \ref{def_conc}), $\fphi \in \gamma(\fphi) \iff \fphi_C \Leftrightarrow \fphi'_C \wedge \fphi_A \Rightarrow \fphi'_A$. Therefore, $\tphi \timp \tphi' \iff \exists \fphi. \fphi \in \gamma(\tphi) \wedge \fphi \imp static(\tphi')$.
+    \item Case $\tphi' = ?_A \ast \phi'$: By $\textsc{implgrad}_A$ (Definition \ref{def_imp}), $\exists \fphi \in \satdef.\fphi_C \Leftrightarrow \fphi'_C \wedge \fphi_A \Rightarrow \fphi'_A \iff \fphi \timp \fphi'$. By definition of $\gamma$ (Definition \ref{def_conc}), $\fphi \in \gamma(\fphi) \iff \fphi_C \Leftrightarrow \fphi'_C \wedge \fphi_A \Rightarrow \fphi'_A$. Therefore, $\tphi \timp \tphi' \iff \exists \fphi. \fphi \in \gamma(\tphi) \wedge \fphi \imp static(\tphi')$.
 
-	\item Case $\tphi' = \fphi' \ast ?_C$: By $\textsc{implgrad}_C$ (Definition \ref{def_imp}), $\exists \fphi \in \satdef.\fphi_A \Leftrightarrow \fphi'_A \wedge \fphi_C \Rightarrow \fphi'_C \iff \fphi \timp \fphi'$. By definition of $\gamma$ (Definition \ref{def_conc}), $\fphi \in \gamma(\fphi) \iff \fphi_A \Leftrightarrow \fphi'_A \wedge \fphi_C \Rightarrow \fphi'_C$. Therefore, $\tphi \timp \tphi' \iff \exists \fphi. \fphi \in \gamma(\tphi) \wedge \fphi \imp static(\tphi')$.
+    \item Case $\tphi' = \fphi' \ast ?_C$: By $\textsc{implgrad}_C$ (Definition \ref{def_imp}), $\exists \fphi \in \satdef.\fphi_A \Leftrightarrow \fphi'_A \wedge \fphi_C \Rightarrow \fphi'_C \iff \fphi \timp \fphi'$. By definition of $\gamma$ (Definition \ref{def_conc}), $\fphi \in \gamma(\fphi) \iff \fphi_A \Leftrightarrow \fphi'_A \wedge \fphi_C \Rightarrow \fphi'_C$. Therefore, $\tphi \timp \tphi' \iff \exists \fphi. \fphi \in \gamma(\tphi) \wedge \fphi \imp static(\tphi')$.
 
 
 
@@ -297,24 +443,28 @@ $$\tphi \timp \tphi' \iff \exists \phi \in \gamma(\tphi), \exists \phi' \in \gam
 
 \begin{proof} (Proof for Lemma \ref{lemma_impl_lift})
 \begin{itemize}
-	\item Case $\Rightarrow$: Let $\phi' = static(\tphi')$. By Lemma \ref{lemma_impl_equiv}, $\exists \phi \in \gamma(\tphi). \phi \imp static(\tphi')$, where $static(\tphi') = \phi'$. 
-	\item Case $\Leftarrow$: By definition of $\gamma$, in all 4 cases, $\forall \phi' \in \gamma(\tphi').\phi' \imp static(\tphi')$. Since $\phi \imp \phi'$, we know $\phi \imp static(\tphi')$ by transitivity of implication. Therefore, the right hand side implies: $$\exists \phi \in \gamma(\tphi).\phi \imp static(\tphi')$$. By Lemma \ref{lemma_impl_equiv}, $\tphi \timp \tphi' $. Therefore, we can replace the inference rule by 
+    \item Case $\Rightarrow$: Let $\phi' = static(\tphi')$. By Lemma \ref{lemma_impl_equiv}, $\exists \phi \in \gamma(\tphi). \phi \imp static(\tphi')$, where $static(\tphi') = \phi'$. 
+    \item Case $\Leftarrow$: By definition of $\gamma$, in all 4 cases, $\forall \phi' \in \gamma(\tphi').\phi' \imp static(\tphi')$. Since $\phi \imp \phi'$, we know $\phi \imp static(\tphi')$ by transitivity of implication. Therefore, the right hand side implies: $$\exists \phi \in \gamma(\tphi).\phi \imp static(\tphi')$$. By Lemma \ref{lemma_impl_equiv}, $\tphi \timp \tphi' $. Therefore, we can replace the inference rule by 
 \end{itemize}
 
 \end{proof}
 
 
-\section{Modified sWLP}
-We redefine $\widetilde{\text{sWLP}}$ to adjust to the new definition of gradual formulas:
+
+
+\section{Dynamic Semantics}
+\label{section_dynamic}
+\begin{definition} (Modified $\widetilde{\textup{sWLP}}^m$)
+We redefine $\widetilde{\textup{sWLP}}^m$ to adjust to the new definition of gradual formulas:
 \begin{center}
 \begin{align*}
-	\widetilde{\text{sWLP}}^m(\bar{s},\tphi) &= 
-	\begin{cases}
-	\fphi'_n \cdot \tphi_{n-1} \cdot ... \cdot \tphi_1\cdot \nil & \tphi_p\text{ and }\tphi_n\text{ precise }\\
-	?_A \ast \fphi'_n \cdot \tphi_{n-1} \cdot ... \cdot \tphi_1\cdot \nil & \tphi_p\text{ or }\tphi_n\text{ acc imprecise } \wedge \tphi_p\text{ and }\tphi_n \text{ classically precise}\\
-	\fphi'_n \ast ?_C \cdot \tphi_{n-1} \cdot ... \cdot \tphi_1\cdot \nil & \tphi_p\text{ and }\tphi_n\text{ acc precise } \wedge \tphi_p\text{ or }\tphi_n \text{ classically imprecise}\\
-	?_A \ast \fphi'_n \ast ?_C \cdot \tphi_{n-1} \cdot ... \cdot \tphi_1\cdot \nil & \tphi_p\text{ or }\tphi_n\text{ acc imprecise } \wedge \tphi_p\text{ or }\tphi_n \text{ classically imprecise}\\
-	\end{cases} 
+    \widetilde{\text{sWLP}}^m(\bar{s},\tphi) &= 
+    \begin{cases}
+    \fphi'_n \cdot \tphi_{n-1} \cdot ... \cdot \tphi_1\cdot \nil & \tphi_p\text{ and }\tphi_n\text{ precise }\\
+    ?_A \ast \fphi'_n \cdot \tphi_{n-1} \cdot ... \cdot \tphi_1\cdot \nil & \tphi_p\text{ or }\tphi_n\text{ acc imprecise } \wedge \tphi_p\text{ and }\tphi_n \text{ classically precise}\\
+    \fphi'_n \ast ?_C \cdot \tphi_{n-1} \cdot ... \cdot \tphi_1\cdot \nil & \tphi_p\text{ and }\tphi_n\text{ acc precise } \wedge \tphi_p\text{ or }\tphi_n \text{ classically imprecise}\\
+    ?_A \ast \fphi'_n \ast ?_C \cdot \tphi_{n-1} \cdot ... \cdot \tphi_1\cdot \nil & \tphi_p\text{ or }\tphi_n\text{ acc imprecise } \wedge \tphi_p\text{ or }\tphi_n \text{ classically imprecise}\\
+    \end{cases} 
 \end{align*}
 where $\tphi_n \cdot \tphi_{n-1} \cdot ... \cdot \tphi_1 \cdot \nil = \twlp{\bar{s}}{\tphi}$\\
 $\fphi'_n = \begin{cases} 
@@ -322,44 +472,55 @@ $\fphi'_n = \begin{cases}
 \min_{\Rightarrow}\{\fphi'_n \mid  static(\tphi_n) \imp \fphi'_n\wedge \lfloor \fphi'_n \rfloor = \emptyset\} &\textup{otherwise}
 \end{cases}$\\
 and $\tphi'_p = mpre(m)[z,x/\texttt{this,mparam(m)}]$\\
-
 \end{center}
+\end{definition}
 
-\section{Dynamic Semantics with Residual Checks}
-\begin{definition} Naive dynanimc semantics of GVL.\\
+\begin{definition} Naive dynanimc semantics.\\
 Let $\langle H,\langle \rho_n, A_n, s_n\rangle \cdot ... \cdot \langle \rho_1, A_1, s_1\rangle \cdot nil \rangle, \langle H,\langle \rho'_n, A'_n, s'_n\rangle \cdot ... \cdot \langle \rho'_1, A'_1, s'_1\rangle \cdot nil \rangle \in \textsc{State}$. If $$\langle H,\langle \rho_n, A_n, s_n\rangle \cdot ... \cdot \langle \rho_1, A_1, s_1\rangle \cdot nil \rangle \longrightarrow \langle H,\langle \rho'_n, A'_n, s'_n\rangle \cdot ... \cdot \langle \rho'_1, A'_1, s'_1\rangle \cdot nil\rangle$$ holds, and $$\bar{\phi} = \tswlp{s_n \cdot ... \cdot s_1}{\true}$$ then\\
 \begin{center}
 $  \langle H,\langle \rho_n, A_n, s_n\rangle \cdot ... \cdot \langle \rho_1, A_1, s_1\rangle \rangle \widetilde{\longrightarrow}
 \begin{cases}
-	 \langle H,\langle \rho'_n, A'_n, s'_n\rangle \cdot ... \cdot \langle \rho'_1, A'_1, s'_1\rangle \rangle & (\forall i \leq n \text{ }\langle H, \rho'_i, A'_i \rangle \tconsistent \bar{\phi}_i)\\
-	 \error &(otherwise)
+     \langle H,\langle \rho'_n, A'_n, s'_n\rangle \cdot ... \cdot \langle \rho'_1, A'_1, s'_1\rangle \rangle & (\forall i \leq n \text{ }\langle H, \rho'_i, A'_i \rangle \tconsistent \bar{\phi}_i)\\
+     \error &(otherwise)
 \end{cases}
 $
 \end{center}
-
+\textbf{\textup{Note: in the naive dynamic semantics, we modified the following cases of $\longrightarrow$ in \textup{SVL\textsubscript{IDF}} to gradual formulas:}}
+\begin{center}
+$method(m) = T_r \hspace{5mm} m(T x') \texttt{\textup{ requires }} \tphi_p \texttt{\textup{ ensures }} \tphi_q \{r\} \hspace{5mm} H,\rho \vdash z \Downarrow o \hspace{5mm} H,\rho \vdash x \Downarrow v$\\
+$A' = \begin{cases} \lfloor \tphi_p \rfloor_{H,\rho'} &\textup{if } \tphi_p \textup{ acc precise} \\ A &\textup{otherwise} \end{cases}$ 
+\end{center}
+\[ \inferrule*[right=$\textsc{SsCall}$]
+    {\rho' = [\textup{this} \mapsto o, x' \mapsto v]\\ \langle H, \rho', A' \rangle \tconsistent \tphi_p}
+    {\langle H, \langle \rho, A, (y = z.m(x);s)\rangle \cdot ...\rangle \longrightarrow {\langle H, \langle \rho', A', r\rangle \cdot \langle \rho, A \setminus A', (y = z.m(x);s)\rangle \cdot ...\rangle}
+}
+\]\\
+\[ \inferrule*[right=$\textsc{SsCallFinish}$]
+    { \langle H, \rho', A' \rangle \tconsistent \tphi_q \\ \rho'' = \rho[y \mapsto \rho'(result)]}
+    { {\langle H, \langle \rho', A', \texttt{\textup{skip}} \rangle \cdot \langle \rho, A \setminus A', (y = z.m(x);s_n)\rangle \cdot S\rangle \widetilde{\longrightarrow}\langle H, \langle \rho'', A \cup A', s_n)\rangle \cdot S\rangle}}
+\]
 \end{definition}
 
 \vspace{5mm}
 \begin{definition} Dynamic semantics with residual checks.
-\[ \inferrule*[right=$\tilde{\textsc{SsLocal}}$]
-	{\langle H, \langle \rho_n, A_n, (s;s_n)\rangle \cdot ...\rangle \longrightarrow \langle H, \langle \rho'_n, A'_n, s_n\rangle \cdot ...\rangle}
-	{	{\langle H, \langle \rho_n, A_n, (s;s_n)\rangle \cdot ...\rangle \widetilde{\longrightarrow} \langle H, \langle \rho'_n, A'_n, s_n\rangle \cdot ...\rangle}
+\[ \inferrule*[right=$\widetilde{\textsc{SsLocal}}$]
+    {\langle H, \langle \rho_n, A_n, (s;s_n)\rangle \cdot ...\rangle \longrightarrow \langle H, \langle \rho'_n, A'_n, s_n\rangle \cdot ...\rangle}
+    {    {\langle H, \langle \rho_n, A_n, (s;s_n)\rangle \cdot ...\rangle \widetilde{\longrightarrow} \langle H, \langle \rho'_n, A'_n, s_n\rangle \cdot ...\rangle}
 }
 \]\\
-
 $method(m) = T_r \hspace{5mm} m(T x') \texttt{\textup{ requires }} \tphi_p \texttt{\textup{ ensures }} \tphi_q \{r\} \hspace{5mm} H,\rho \vdash z \Downarrow o \hspace{5mm} H,\rho \vdash x \Downarrow v$\\
 $\rho' = [\texttt{\textup{this}} \mapsto o, x' \mapsto v] \hspace{5mm} A' = \begin{cases} \lfloor \tphi_p \rfloor_{H,\rho'} &\textup{if } \tphi_p \textup{ acc precise} \\ A &\textup{otherwise} \end{cases}$ 
-\[ \inferrule*[right=$\tilde{\textsc{SsCall}}$]
-	{\langle H,\rho', A' \rangle \tconsistent \tphi_p \\ \langle H, \rho', A' \rangle \tconsistent \tdiff{\twlp{r}{\tphi_q}}{\tphi_p}}
-	{\langle H, \langle \rho, A, (y = z.m(x);s)\rangle \cdot ...\rangle \widetilde{\longrightarrow} {\langle H, \langle \rho', A', r\rangle \cdot \langle \rho, A \setminus A', (y = z.m(x);s)\rangle \cdot ...\rangle}
+\[ \inferrule*[right=$\widetilde{\textsc{SsCall}}$]
+    {\langle H,\rho', A' \rangle \tconsistent \tphi_p \\ \langle H, \rho', A' \rangle \tconsistent \tdiff{\twlp{r}{\tphi_q}}{\tphi_p}}
+    {\langle H, \langle \rho, A, (y = z.m(x);s)\rangle \cdot ...\rangle \widetilde{\longrightarrow} {\langle H, \langle \rho', A', r\rangle \cdot \langle \rho, A \setminus A', (y = z.m(x);s)\rangle \cdot ...\rangle}
 }
 \]\\
 
 $mpost(m) = \tphi_q \hspace{5mm} \rho'' = \rho[y \mapsto \rho'(result)] \hspace{5mm} \tphi'_q = \tphi_q[z,x,y/this,old(mparam(m),result)]$\\
 $\tphi'_p = mpre(m)[z,x/\texttt{\textup{\textup{this,mparam(m)}}}] \hspace{5mm} \tphi = \tswlpn{s_n \cdot ...}{true}$
-\[ \inferrule*[right=$\tilde{\textsc{SsCallFinish}}$]
-	{ \langle H, \rho'', A \cup A' \rangle \tconsistent \tdiff{\tphi}{\tsp{y := z.m(x)}{\tphi}}}
-	{ {\langle H, \langle \rho', A', \texttt{\textup{skip}} \rangle \cdot \langle \rho, A \setminus A', (y = z.m(x);s_n)\rangle \cdot S\rangle \widetilde{\longrightarrow}\langle H, \langle \rho'', A \cup A', s_n)\rangle \cdot S\rangle}}
+\[ \inferrule*[right=$\widetilde{\textsc{SsCallFinish}}$]
+    { \langle H, \rho'', A \cup A' \rangle \tconsistent \tdiff{\tphi}{\tsp{y := z.m(x)}{\tphi}}}
+    { {\langle H, \langle \rho', A', \texttt{\textup{skip}} \rangle \cdot \langle \rho, A \setminus A', (y = z.m(x);s_n)\rangle \cdot S\rangle \widetilde{\longrightarrow}\langle H, \langle \rho'', A \cup A', s_n)\rangle \cdot S\rangle}}
 \]
 \end{definition}
 
@@ -380,10 +541,10 @@ Let $\widetilde{\text{diff}} : \gradformula \times \gradformula \rightarrow \gra
 \begin{center}
 $  \tdiff{\tphi_j}{\tphi_k} = 
 \begin{cases}
-	 \diff{\tphi_j}{\static{\tphi_k}} & (\tphi_j\text{ precise})\\
-	 ?_A \ast \diff{\phi_j}{\static{\tphi_k}} & (\tphi_j = ?_A \ast \phi_j)\\
-	 \diff{\phi_a}{\static{\tphi_j}} \ast ?_C & (\tphi_j = \phi_j \ast ?_C)\\
-	 ?_A \ast \diff{\phi_j}{\static{\tphi_k}} \ast ?_C& (\tphi_j = ?_A \ast \phi_j \ast ?_C)\\
+     \diff{\tphi_j}{\static{\tphi_k}} & (\tphi_j\text{ precise})\\
+     ?_A \ast \diff{\phi_j}{\static{\tphi_k}} & (\tphi_j = ?_A \ast \phi_j)\\
+     \diff{\phi_a}{\static{\tphi_j}} \ast ?_C & (\tphi_j = \phi_j \ast ?_C)\\
+     ?_A \ast \diff{\phi_j}{\static{\tphi_k}} \ast ?_C& (\tphi_j = ?_A \ast \phi_j \ast ?_C)\\
 \end{cases}
 $
 \end{center}
@@ -392,10 +553,10 @@ $
 \vspace*{10mm}
 \begin{lemma}
 \label{lemma_dynamic_residual}
-Dynamic semantics with residual checks is equivalent with full checks.
+Dynamic semantics with residual checks is equivalent to dynamic semantics with naive full checks.
 \end{lemma}
 \begin{proof} Proof for Lemma \ref{lemma_dynamic_residual}. We prove the lemma by cases on the state $\langle H,S \rangle$. We assume $\langle H,S \rangle$ is valid. We will show after one step of evaluation $\langle H, S \rangle \longrightarrow \langle H,S' \rangle$, the state $\langle H,S' \rangle$ satisfies residual checks if the state $H,S'$ satisfies the residual checks. The other direction (residual checks satisfied if full checks satisfied) is trivial since residual check is a subset of the full check.
-\subsubsection*{Case $\tilde{\textsc{SsLocal}}$}
+\subsubsection*{Case $\widetilde{\textsc{SsLocal}}$}
 In this case, $S = \langle \rho_n, A_n, s; s_n\rangle \cdot ...$, where $s$ does not involve a method call. After one step of evaluation, assume $\langle H, S \rangle \longrightarrow \langle H,S' \rangle$, where $S' = \langle \rho'_n, A'_n, s_n\rangle \cdot ...$. The naive semantics proposes to perform the following check: 
 $$\langle H, \rho', A'_n \rangle \tconsistent \tphi$$ where $\tphi =\tswlpn{s_n \cdot ... \cdot s_1}{true}$. 
 By assumption, the state we leave must be valid: $$\langle H, \rho_n, A_n \rangle \tconsistent \tswlpn{s;s_n \cdot ... \cdot s_1 \cdot nil}{ true} = \twlp{s}{\tphi}$$ By definition of $\widetilde{\text{SP}}$, $$\langle H, \rho'_n, A'_n \rangle  \tconsistent \tsp{s}{\twlp{s}{\tphi}}$$ By definition of $\widetilde{SP}$, we also know that for arbitrary precise formula $\phi$, $$\tsp{s}{\twlp{s} {\phi}} \Rightarrow \phi$$ Therefore, by setting $\phi = \static{\tphi}$,
@@ -407,26 +568,26 @@ By assumption, the state we leave must be valid: $$\langle H, \rho_n, A_n \rangl
 \end{align*}
 Therefore, $\langle H, \rho', A'_n \rangle \tconsistent \static{\tphi}$, and therefore $\langle H, \rho', A'_n \rangle \tconsistent \tphi$ by definition of consistent formula lifting.
 
-\subsubsection*{Case $\tilde{\textsc{SsCall}}$}
+\subsubsection*{Case $\widetilde{\textsc{SsCall}}$}
 In this case, $S = \langle \rho, A, (y = z.m(x); s)\rangle \cdot ...$. Recalling the definitions in \textsc{SsCall}, $$m(x′) \text{ requires } \tphi_p \text{ ensures } \tphi_q \{ r \}$$ 
 Let $\bar{\phi}  = \tswlp{r \cdot (y = z.m(x);s) \cdot ...}{\true}$. Let $\tphi = \bar{\phi} _{|\bar{\phi} |}$ and $\tphi' = \bar{\phi} _{|\bar{\phi} |-1}$.\\
 After one step of evaluation, $\langle H,S \rangle \widetilde{\longrightarrow} \langle H,S' \rangle$, where $$S' =  \langle \rho', A', r) \rangle \cdot \langle \rho, A \setminus A', y = z.m(x); s\rangle \cdot ...$$
 The naive semantics proposes to perform the following 3 checks:
 \begin{enumerate}
-	\item $\langle H, \rho', A'  \rangle \tconsistent \tphi_p$: according to $\widetilde{\textsc{SsCall}}$, this check is performed explicitly.\\ 
-	\item $\langle H, \rho', A'  \rangle \tconsistent \tphi = \twlp{r}{\tphi_q}$: by definition of $\widetilde{\text{diff}}$, since we checked for $\langle H, \rho', A'  \rangle \tconsistent  \tphi_p$ explicitly, the naive check is reduced to:
+    \item $\langle H, \rho', A'  \rangle \tconsistent \tphi_p$: according to $\widetilde{\textsc{SsCall}}$, this check is performed explicitly.\\ 
+    \item $\langle H, \rho', A'  \rangle \tconsistent \tphi = \twlp{r}{\tphi_q}$: by definition of $\widetilde{\text{diff}}$, since we checked for $\langle H, \rho', A'  \rangle \tconsistent  \tphi_p$ explicitly, the naive check is reduced to:
 $$\langle H, \rho', A'  \rangle \tconsistent \tdiff{\twlp{r}{\tphi_q}}{\tphi_p}$$which is checked explicitly in the residual checks.
-	\item $\langle H, \rho, A \setminus A' \rangle \tconsistent \tphi'$: let $\tphi_n = \tswlpn{(y = z.m(x);s) \cdot ...}{true}$.\\
+    \item $\langle H, \rho, A \setminus A' \rangle \tconsistent \tphi'$: let $\tphi_n = \tswlpn{(y = z.m(x);s) \cdot ...}{true}$.\\
 \begin{itemize}
-	\item Case $\tphi'_p$ acc precise: by definition of $\widetilde{\textup{sWLP}}^m$, $static(\tphi') = \fphi'$, where $$\fphi' = min_{\imp}\{\fphi'' \mid static(\tphi_n) \imp \fphi'' \ast \tphi'_p \wedge \fphi'' \ast \tphi'_p \in \satdef\}$$ By the dynamic semantics, we can assume the state we left must passed the check of the naive semantics, therefore $\langle H, \rho, A \rangle \tconsistent \tphi_n$. Since $\tphi_n \imp \fphi'$, we know that $\langle H, \rho, A \rangle \tconsistent \fphi'$. We also know that $\lfloor \fphi' \rfloor \cap \lfloor \tphi_p \rfloor = \emptyset$ since $\fphi' \ast \tphi_p \in \satdef$. Since $A' = \lfloor \tphi_p \rfloor$ by \textsc{SsCall}, we can conclude that $\langle H, \rho, A \setminus A'\rangle \tconsistent \fphi'$, since removing each field in $A'$ must not appear in $\fphi'$. Therefore, $$\langle H, \rho, A \setminus A'\rangle \tconsistent static(\tphi')$$ so we can conclude $$\langle H, \rho, A \setminus A'\rangle \tconsistent \tphi'$$
-	
-	\item Case $\tphi'_p$ acc imprecise:by definition of $\widetilde{\textup{sWLP}}^m$, $\tphi' = \fphi'$, where $$\fphi' = min_{\imp}\{\fphi'' \mid static(\tphi_n) \imp \fphi'' \wedge \lfloor \fphi'' \rfloor = \emptyset\}$$ By the dynamic semantics, we can assume the state we left must passed the check of the naive semantics, therefore $\langle H, \rho, A \rangle \tconsistent \tphi_n$. Since $\tphi_n \imp \fphi'$, we know that $\langle H, \rho, A \rangle \tconsistent \fphi'$. We also know that $A' = A$, and therefore $A \setminus A' = \emptyset$. Since $\lfloor \fphi' \rfloor = \emptyset$, we can conclude that $$\langle H, \rho, A \setminus A'\rangle \tconsistent \fphi'$$ since the formula has empty footprint, and $A \setminus A'$ is also empty. Since $\tphi' = \fphi'$, we finally conclude that $$\langle H, \rho, A \setminus A'\rangle \tconsistent \tphi'$$
+    \item Case $\tphi'_p$ acc precise: by definition of $\widetilde{\textup{sWLP}}^m$, $static(\tphi') = \fphi'$, where $$\fphi' = min_{\imp}\{\fphi'' \mid static(\tphi_n) \imp \fphi'' \ast \tphi'_p \wedge \fphi'' \ast \tphi'_p \in \satdef\}$$ By the dynamic semantics, we can assume the state we left must passed the check of the naive semantics, therefore $\langle H, \rho, A \rangle \tconsistent \tphi_n$. Since $\tphi_n \imp \fphi'$, we know that $\langle H, \rho, A \rangle \tconsistent \fphi'$. We also know that $\lfloor \fphi' \rfloor \cap \lfloor \tphi_p \rfloor = \emptyset$ since $\fphi' \ast \tphi_p \in \satdef$. Since $A' = \lfloor \tphi_p \rfloor$ by \textsc{SsCall}, we can conclude that $\langle H, \rho, A \setminus A'\rangle \tconsistent \fphi'$, since removing each field in $A'$ must not appear in $\fphi'$. Therefore, $$\langle H, \rho, A \setminus A'\rangle \tconsistent static(\tphi')$$ so we can conclude $$\langle H, \rho, A \setminus A'\rangle \tconsistent \tphi'$$
+    
+    \item Case $\tphi'_p$ acc imprecise:by definition of $\widetilde{\textup{sWLP}}^m$, $\tphi' = \fphi'$, where $$\fphi' = min_{\imp}\{\fphi'' \mid static(\tphi_n) \imp \fphi'' \wedge \lfloor \fphi'' \rfloor = \emptyset\}$$ By the dynamic semantics, we can assume the state we left must passed the check of the naive semantics, therefore $\langle H, \rho, A \rangle \tconsistent \tphi_n$. Since $\tphi_n \imp \fphi'$, we know that $\langle H, \rho, A \rangle \tconsistent \fphi'$. We also know that $A' = A$, and therefore $A \setminus A' = \emptyset$. Since $\lfloor \fphi' \rfloor = \emptyset$, we can conclude that $$\langle H, \rho, A \setminus A'\rangle \tconsistent \fphi'$$ since the formula has empty footprint, and $A \setminus A'$ is also empty. Since $\tphi' = \fphi'$, we finally conclude that $$\langle H, \rho, A \setminus A'\rangle \tconsistent \tphi'$$
 
 \end{itemize}
 \end{enumerate}
 
 
-\subsubsection*{Case $\tilde{\textsc{SsCallFinish}}$}
+\subsubsection*{Case $\widetilde{\textsc{SsCallFinish}}$}
 In this case, $s = y:=z.m(x)$ and $S =\langle \rho', A', \textup{\texttt{skip}} \cdot \langle \rho, A, s; s_n\rangle \cdot ...$ The naive semantics proposes to perform the following check: 
 $$\langle H, \rho'', A \cup A' \rangle \tconsistent \tphi$$ where $\tphi =\tswlpn{s_n \cdot ... \cdot s_1}{true}$. 
 By assumption, the state before the method call must be valid: $$\langle H, \rho'', A \cup A' \rangle \tconsistent \tswlpn{s;s_n \cdot ... \cdot s_1 \cdot nil}{ true} = \twlp{s}{\tphi}$$ By definition of $\widetilde{\text{SP}}$, since state $\langle H, \rho', A' \rangle$ is reached by execution of s, $$\langle H, \rho', A' \rangle  \tconsistent \tsp{s}{\twlp{s}{\tphi}}$$ Therefore, the check proposed in the naive semantics is reduced to  $$\langle H, \rho', A' \rangle  \tconsistent \tdiff{\tphi}{\tsp{s}{\twlp{s}{\tphi}}}$$
@@ -435,7 +596,8 @@ By assumption, the state before the method call must be valid: $$\langle H, \rho
 \end{proof}
 
 \section{Soundness}
-We now establish the soundness of GVL with full checks. Since in the previous section we proved the dynmaic semantics with residual checks is equivalent to full checks, we proceed the proof of soundness only with full checks, and therefore extensible to residual checks.
+\label{section_soundness}
+We now establish the soundness with full checks. Since in the previous section we proved the dynmaic semantics with residual checks is equivalent to full checks, we proceed the proof of soundness only with full checks, and therefore extensible to residual checks.
 \vspace*{5mm}
 \begin{definition}
 We call the state $\langle H, \langle \rho_n, A_n, s_n \rangle \cdot ... \cdot \langle \rho_1, A_1, s_1 \rangle \cdot nil \rangle \in \textsc{State}$ valid if $\langle H, \rho_i, A_i \rangle \consistent sWLP_i(s_n\cdot ... \cdot s_1 \cdot nil, \true)$ for all $1 \leq i \leq n$.
@@ -447,7 +609,7 @@ We call the state $\langle H, \langle \rho_n, A_n, s_n \rangle \cdot ... \cdot \
 If $\langle H, S \rangle \in \textsc{State}$ is a valid state, then for some $\langle H', S' \rangle \in \textsc{State}$, $\langle H, S \rangle \widetilde{\longrightarrow} \langle H', S' \rangle$ or $\langle H, S \rangle \widetilde{\longrightarrow} \textbf{error}$. 
 \end{lemma}
 \begin{proof} Proof for Progress (Lemma \ref{lemma_progress}). \\
-We are given a valid state $\langle H,S\rangle \in \textsc{State}$. Soundness of SVL implies that $\longrightarrow$ will step. By definition of the naive dynamic semantics, $\widetilde{\longrightarrow}$ either steps as in SVL if the checks succeed, or go to the error state. 
+We are given a valid state $\langle H,S\rangle \in \textsc{State}$. Soundness of SVL\textsubscript{IDF} implies that $\longrightarrow$ will step. By definition of the naive dynamic semantics, $\widetilde{\longrightarrow}$ either steps as in SVL\textsubscript{IDF} if the checks succeed, or go to the error state. 
 \end{proof}
 
 \begin{lemma} (Preservation)\\
@@ -456,78 +618,92 @@ If $\langle H, S \rangle$ is a valid state and for some $\langle H', S' \rangle 
 \end{lemma}
 
 \begin{proof} Proof for Progress (Lemma \ref{lemma_preservation}). \\
-We are given a valid state $\langle H,S\rangle \in \textsc{State}$. Soundness of SVL says that $\longrightarrow$ will step to another valid state.\\
+We are given a valid state $\langle H,S\rangle \in \textsc{State}$. Soundness of SVL\textsubscript{IDF} guarantees that $\longrightarrow$ will step to another valid state.\\
 \begin{itemize}
-	\item If the explicit check succeeds, By definition of the naive dynamic semantics, $\widetilde{\longrightarrow}$ either steps as in SVL if the checks succeed, or go to the error state. 
-	\item If the explicit check fails, then the program steps to error state, which trivially satisfies preservation. 
+    \item If the explicit check succeeds, By definition of the naive dynamic semantics, $\widetilde{\longrightarrow}$ either steps as in SVL\textsubscript{IDF} if the checks succeed, or go to the error state. 
+    \item If the explicit check fails, then the program steps to an error state, which trivially satisfies preservation. 
 
 \end{itemize}
 \end{proof}
 
-\section{Static Gradual Gaurantee of GVL}
+\section{Gradual guarantee}
+\label{section_guarantee}
+The following lemma is trivial by the definition of $\widetilde{\textup{WLP}}$.
 \begin{lemma}
 \label{lemma_wlp_precision}
-Let $p \in \textsc{Stmt}$ $\tphi, \tphi' \in \textsc{Formula}$ such that $\tphi \sqsubseteq \tphi'$, then $\twlp{s}{\tphi} \sqsubseteq \twlp{s}{\tphi'}$.
+Let $p \in \textsc{Stmt}$ $\tphi, \tphi' \in \gradformula$ such that $\tphi \sqsubseteq \tphi'$, then $\twlp{s}{\tphi} \sqsubseteq \twlp{s}{\tphi'}$.
 \end{lemma}
-
 \begin{lemma}
-\label{lemma_swlp_precision}
-Let $\bar{s} \in ???$ $\tphi, \tphi' \in \textsc{Formula}$ such that $\tphi \sqsubseteq \tphi'$, then $\forall 1 \leq i \leq n, \tswlpi{s}{\tphi} \sqsubseteq \tswlpi{s}{\tphi'}$.
+\label{lemma_static_prec_implication}
+Let $\tphi, \tphi' \in \gradformula$ such that $\tphi \sqsubseteq \tphi'$. Then, $static(\tphi) \imp static(\tphi')$.
 \end{lemma}
+\begin{proof} Since $\tphi \sqsubseteq \tphi'$, we know $$\gamma(\tphi) \subseteq \gamma(\tphi')$$ Since $\forall \fphi' \in \gamma(\tphi')$, $\fphi' \imp static(\tphi')$ by the definition of $\gamma$, therefore,  $\forall \fphi \in \gamma(\tphi)$, $\fphi' \imp static(\tphi')$. Since $\static(\tphi) \in \gamma(\tphi)$, we can conclude that $static(\tphi) \imp static(\tphi')$.
 
+\end{proof}
 \begin{lemma}
-Let $p_1, p_2 \in \textsc{Program}$ such that $p_1 \sqsubseteq p_2$, then if $p_1$ is valid, then $p_2$ is valid.
+\label{lemma_precision_implication}
+Let $\tphi_1, \tphi_2, \tphi'_1, \tphi'_2 \in \gradformula$ satisfy: $\tphi_1 \timp \tphi_2$, $\tphi_1 \sqsubseteq \tphi'_1$ and $\tphi_2 \sqsubseteq \tphi'_2$. Then, $\tphi'_1 \timp \tphi'_2$.
 \end{lemma}
-\begin{proof}
-Validity of functions and programs relies on $\widetilde{\textup{sWLP}}$. Therefore, we prove the lemma based on different cases in WLP.
+\begin{proof} (Proof for Lemma \ref{lemma_precision_implication})
+By definition, $\gamma(\tphi'_1) \subseteq \gamma(\tphi_1)$ and $\gamma(\tphi'_2) \subseteq \gamma(\tphi_2)$. By Lemma \ref{lemma_impl_equiv}, since $\tphi_1 \timp \tphi_2$, $\exists \fphi_1 \in \gamma(\tphi_1). \fphi_1 \imp static(\tphi_2)$. Therefore, $\exists \fphi \in \gamma(\tphi'_1). \fphi \imp static(\tphi_2)$. By Lemma \ref{lemma_static_prec_implication}, since $\tphi_2 \sqsubseteq \tphi'_2$, $static(\tphi_2) \imp static(\tphi'_2)$. Therefore, $$\exists \fphi \in \gamma(\tphi'_1). \fphi \imp static(\tphi'_2)$$ which is the definition of $\tphi'_1 \timp \tphi'_2$.
 \end{proof}
 
-\section{Dynamic Gradual Guarantee of GVL}
+\begin{lemma} (Static Gradual Guarantee)
+\label{lemma_static_grad_guarantee}
+Let $p_1, p_2 \in \textsc{Program}$ such that $p_1 \sqsubseteq p_2$, then if $p_1$ is valid, then $p_2$ is valid.
+\end{lemma}
+\begin{proof} (Proof for Lemma \ref{lemma_static_grad_guarantee})\\
+Validity of a program relies on validity of each individual method. Consider the following methods $$method(m) = T_r \hspace{5mm} m(T\text{ }x') \texttt{\textup{ requires }} \tphi_p \texttt{\textup{ ensures }} \tphi_q \{r\} $$ and $$method(m') = T_r \hspace{5mm} m(T\text{ }x') \texttt{\textup{ requires }} \tphi'_p \texttt{\textup{ ensures }} \tphi'_q \{r\} $$ where $\tphi_p \sqsubseteq \tphi'_p$ and $\tphi_q \sqsubseteq \tphi'_q$. We assume $m$ is a valid. By Lemma \ref{lemma_wlp_precision}, $\twlp{r}{\tphi_q} \sqsubseteq \twlp{r}{\tphi'_q}$. Since $m$ is valid, $\tphi_p \timp \twlp{r}{\tphi_q}$. By Lemma \ref{lemma_precision_implication}, we can conclude $\tphi'_p \timp \twlp{r}{\tphi'_q}$, therefore $m'$ is valid.
+\end{proof}
+
 \begin{definition} (State Precision)
 Let $\pi_1, \pi_2 \in \textsc{State}$. Then $\pi_1$ is more precise than $\pi_2$, written $\pi_1 \lesssim \pi_2$, if and only if all of the following applies:
 \begin{enumerate}
-	\item $\pi_1$ and $\pi_2$ have identical heap and stacks of size n.
-	\item The stack of variable environments and stack of statements is identical.
-	\item Let $A^1_{1...n}$ and $A^2_{1...n}$ be the stack of footprints of $\pi_1$ and $\pi_2$, respectively. Then, the following holds for $1 \leq m \leq n$: $$\bigcup_{i = m}^n A^1_i \subseteq \bigcup_{i=m}^n A^2_i$$
+    \item $\pi_1$ and $\pi_2$ have identical heap and stacks of size n.
+    \item The stack of variable environments and stack of statements is identical.
+    \item Let $A^1_{1...n}$ and $A^2_{1...n}$ be the stack of footprints of $\pi_1$ and $\pi_2$, respectively. Then, the following holds for $1 \leq m \leq n$: $$\bigcup_{i = m}^n A^1_i \subseteq \bigcup_{i=m}^n A^2_i$$
 \end{enumerate}
 \end{definition}
-\begin{lemma} 
+\begin{lemma}
+\label{lemma_swlp_precision}
+Let $\bar{s} \in \textsc{Stack}$, $\tphi, \tphi' \in \textsc{Formula}$ such that $\tphi \sqsubseteq \tphi'$, then $\forall 1 \leq i \leq n, \tswlpi{s}{\tphi} \sqsubseteq \tswlpi{s}{\tphi'}$.
+
+\end{lemma}
+\begin{lemma} (Dyanmic Gradual Guarantee)
+\label{dynamic_grad_guarantee}
 Let $p_1, p_2 \in \textsc{Program}$ such that $p1 \sqsubseteq p2$, and $pi \in \textsc{State}$ such that $\pi_1 \lesssim \pi_2$. If $\pi_1 \widetilde{\rightarrow}_{p_1} \pi'_1$, then $\pi_2 \widetilde{\rightarrow}_{p_2} \pi'_2$ for some $\pi'_2 \in \textsc{State}$ and $\pi'_1 \lesssim \pi'_2$.
 \end{lemma}
 
-\begin{proof}
-We analyze the definition of $\widetilde{\rightarrow}$. Increasing imprecision of contracts will increase the imprecision of $\widetilde{\textup{sWLP}}$ by Lemma \ref{lemma_swlp_precision} and hence increase the chances that that the non- error case applies. Hence, if $\pi_1 \widetilde{\imp}_{p_1} \pi'_1$, then $\pi_2 \widetilde{\imp}_{p_2} \pi'_2$. Now all we need to prove is $\pi'_1 \lesssim \pi'_2$. $\pi'_1$ and $\pi'_2$ have the same heap, stack size, variable environments and stack of statements, since the programs are identical, and difference in contracts doesn't affect heap and stack, so the first 2 properties of $\lesssim$ are trivial. We finally prove the third property of $\lesssim$: $$\bigcup_{i = m}^{n - 1} A'^1_i  \subseteq \bigcup_{i=m}^{n - 1} A'^2_i$$
+\begin{proof} (Proof for Lemma \ref{dynamic_grad_guarantee})\\
+We analyze the definition of $\widetilde{\rightarrow}$. Increasing imprecision of contracts will increase the imprecision of $\widetilde{\textup{sWLP}}$ by Lemma \ref{lemma_swlp_precision} and hence increase the chances that that the non-error case applies. Hence, if $\pi_1 \widetilde{\imp}_{p_1} \pi'_1$, then $\pi_2 \widetilde{\imp}_{p_2} \pi'_2$. Now all we need to prove is $\pi'_1 \lesssim \pi'_2$. $\pi'_1$ and $\pi'_2$ have the same heap, stack size, variable environments and stack of statements, since the programs are identical, and difference in contracts doesn't affect the environmnet except the dynamic footprint, so the first 2 properties of $\lesssim$ are trivial. We finally prove the third property of $\lesssim$: $$\bigcup_{i = m}^{n - 1} A'^1_i  \subseteq \bigcup_{i=m}^{n - 1} A'^2_i$$
 
 The dynamic footprints satisfies the requiresment. Let stack size before executing the next statement be $n$. We assume the state before executing the statement satisfies for $1 \leq m \leq n$: $$\bigcup_{i = m}^n A^1_i \subseteq \bigcup_{i=m}^n A^2_i$$
-We perform the analysis based on the naive dynamic sementics. Since the naive dynamic semantics changes the dynamic footprint according to SVL, we only need to analyze the 3 cases in SVL that changes the dynamic footprint: \textsc{SsAlloc}, \textsc{SsCall} and \textsc{SsCallFinish}
-	\begin{itemize}
-		\item Case \textsc{SsAlloc}: the only change to the dynamic footprint is to add $\langle o, f_i \rangle$ to both $A^1_n$ and $A^2_n$. Therefore, the property still holds after the statement is executed.
-		\item Case \textsc{SsCall}: recalling from \textsc{SsCall}, let $\tphi^1$ represent the precondition in $p_1$ and $\tphi^2$ represents the precondition in $p_2$. Consider the following cases: 
-		\begin{enumerate}
-			\item $\tphi^2$ acc precise. Then, since $\tphi^1 \sqsubseteq \tphi^2$, $\tphi^1$ must also be acc precise, which implies $\tphi_a^1 = \tphi_a^2$. Therefore, $\lfloor \tphi^1 \rfloor = \lfloor \tphi^2 \rfloor$. Therefore, $A'^1_{n+1} = A'^2_{n+1}$, which implies $$A'^1_{n+1} \subseteq A'^2_{n+1}$$. 
-			\item $\tphi^2$ acc imprecise, then by \textsc{SsCall}, $A'^2_{n+1} = A^2_n$. Since we know that $A^1_n \subseteq A^2_n$ by plugging $m = n$ into assumption, and $A'^1_n \subseteq A^1_n$ by framing rule, we can conclude that $$A'^1_{n+1} \subseteq A'^2_{n+1}$$.
-		\end{enumerate}
+We perform the analysis based on the naive dynamic sementics. Since the naive dynamic semantics changes the dynamic footprint in the same way as in SVL\textsubscript{IDF}, we only need to analyze the 3 cases in SVL\textsubscript{IDF} that changes the dynamic footprint: \textsc{SsAlloc}, \textsc{SsCall} and \textsc{SsCallFinish}
+    \begin{itemize}
+        \item Case \textsc{SsAlloc}: the only change to the dynamic footprint is to add $\langle o, f_i \rangle$ to both $A^1_n$ and $A^2_n$. Therefore, the subset relation still holds after the statement is executed.
+        \item Case \textsc{SsCall}: recalling from \textsc{SsCall}, let $\tphi^1$ represent the precondition in $p_1$ and $\tphi^2$ represents the precondition in $p_2$. Consider the following cases: 
+        \begin{enumerate}
+            \item $\tphi^2$ acc precise. Then, since $\tphi^1 \sqsubseteq \tphi^2$, $\tphi^1$ must also be acc precise, which implies $\tphi_a^1 = \tphi_a^2$. Therefore, $\lfloor \tphi^1 \rfloor = \lfloor \tphi^2 \rfloor$. Therefore, $A'^1_{n+1} = A'^2_{n+1}$, which implies $A'^1_{n+1} \subseteq A'^2_{n+1}$.
+            \item $\tphi^2$ acc imprecise, then by \textsc{SsCall}, $A'^2_{n+1} = A^2_n$. Since we know that $A^1_n \subseteq A^2_n$ by plugging $m = n$ into assumption, and $A'^1_n \subseteq A^1_n$ by framing rule, we can conclude that $A'^1_{n+1} \subseteq A'^2_{n+1}$.
+        \end{enumerate}
 Since we know $$\bigcup_{i = m}^n A^1_i \subseteq \bigcup_{i=m}^n A^2_i$$ and clearly $A^1_n$ is partitioned into $A'^1_n$ and $A'^1_{n+1}$ and $A^2_n$ is partitioned into $A'^2_n$ and $A'^2_{n+1}$, so we can conclude that when $ 1 \leq m \leq n$
 $$\bigcup_{i = m}^{n+1} A'^1_i = \bigcup_{i = m}^n A^1_i \subseteq \bigcup_{i=m}^n A^2_i = \bigcup_{i = m}^{n+1} A'^2_i$$
 When, $m = n + 1$, $$\bigcup_{i = m}^{n+1} A'^1_i = A'^1_{n+1} \subseteq A'^2_{n+1} = \bigcup_{i = m}^{n+1} A'^2_i$$ Therefore, $\forall 1 \leq m \leq n+1$:
 $$\bigcup_{i = m}^{n+1} A'^1_i  \subseteq \bigcup_{i = m}^{n+1} A'^2_i$$
-		\item Case \textsc{SsCallFinish}: By \textsc{SsCallFinish}, $A'^1_{n-1} = A^1_{n} \cup A^1_{n-1}$ and $A'^2_{n-1} = A^2_{n} \cup A^2_{n - 1}$. Since we can assume that $\forall 1 \leq m \leq n$: $$\bigcup_{i = m}^n A^1_i \subseteq \bigcup_{i=m}^n A^2_i$$ Therefore, $\forall 1 \leq m \leq n-1$: $$\bigcup_{i = m}^{n - 1} A'^1_i =\bigcup_{i = m}^{n} A^1_i \subseteq \bigcup_{i = m}^{n} A^2_i  = \bigcup_{i=m}^{n - 1} A'^2_i$$
+        \item Case \textsc{SsCallFinish}: By \textsc{SsCallFinish}, $A'^1_{n-1} = A^1_{n} \cup A^1_{n-1}$ and $A'^2_{n-1} = A^2_{n} \cup A^2_{n - 1}$. Since we can assume that $\forall 1 \leq m \leq n$: $$\bigcup_{i = m}^n A^1_i \subseteq \bigcup_{i=m}^n A^2_i$$ Therefore, $\forall 1 \leq m \leq n-1$: $$\bigcup_{i = m}^{n - 1} A'^1_i =\bigcup_{i = m}^{n} A^1_i \subseteq \bigcup_{i = m}^{n} A^2_i  = \bigcup_{i=m}^{n - 1} A'^2_i$$
 \end{itemize}
 \end{proof}
-
+\section{Conclusion}
 \pagebreak
-\section*{Appendix}
-The following proof for the non IDF version of \textsc{SsCallFinish} no longer works:\\ 
-Let s be the statement $y := z.m(x)$.\\
-\begin{align*}
-&\tsp{s}{\twlp{s}{\tphi}} \\
-=&\alpha(\{\min_{\Rightarrow}\{ \phi'' \ast \phi_q \mid (\phi \Rightarrow \phi'') \wedge y \notin  FV(\phi'') \wedge \phi'' \Rightarrow \phi_p\} \mid \phi\in \gamma(\wlp{s}{\tphi}), \phi_p \in \gamma(\tphi_p'), \phi_q \in \gamma(\tphi_q')\})\\
-=&\alpha(\{\min_{\Rightarrow}\{ \phi'' \ast \phi_q \mid (\phi \Rightarrow \phi'') \wedge y \notin  FV(\phi'') \wedge \phi'' \Rightarrow \phi_p\} \mid y \notin FV(\phi) \wedge (\phi \timp \tphi'_p) \wedge (\phi \ast \tphi'_q \timp \tphi) , \\&\phi_p \in \gamma(\tphi_p'), \phi_q \in \gamma(\tphi_q')\})\\
-=&\alpha(\{ \phi \ast \phi_q \mid y \notin FV(\phi) \wedge (\phi \imp \phi_p) \wedge (\phi \ast \tphi'_q \timp \tphi), \phi_p \in \gamma(\tphi_p'), \phi_q \in \gamma(\tphi_q') \})\\
-=&\alpha(\{ \phi \ast static(\tphi'_q) \mid y \notin FV(\phi) \wedge (\phi \imp static(\tphi'_p)) \wedge (\phi \ast \tphi'_q \timp \tphi) \})
-\end{align*}
-
-
-
+\begin{thebibliography}{999}
+\bibliographystyle{plain}
+\bibitem{p1}  Johannes Bader, Jonathan Aldrich, and Eric Tanter. Gradual Program Verification. Proc. VMCAI, January 2018.
+\bibitem{p2} Smans, J., Jacobs, B., Piessens F.: Implicit dynamic frames. FTfJP 2008, Technical Report ICIS-R08013, Radboud University, pp. 1-12 (2008)
+\bibitem{p3} Hoare, C.A.R.: An axiomatic basis for computer programming. Communications of the ACM 12(10), 576–580 (1969)
+\bibitem{p4} Reynolds, J.C.: Separation logic: A logic for shared mutable data structures. In: Logic in Computer Science, 2002. Proceedings. 17th Annual IEEE Symposium on.
+pp. 55–74. IEEE (2002)
+\bibitem{p5} Smans, J., Jacobs, B., Piessens, F.: Implicit dynamic frames: Combining dynamic frames and separation logic. In: European Conference on Object-Oriented Pro- gramming. pp. 148–172. Springer (2009)
+\bibitem{p6} Meyer, B.: Object-Oriented Software Construction. Prentice Hall (1988)
+\end{thebibliography}
 
 \end{document}
